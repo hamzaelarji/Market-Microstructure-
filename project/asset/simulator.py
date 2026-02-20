@@ -269,7 +269,7 @@ def simulate_naive(
 if __name__ == "__main__":
     
     print("Solving ODE (Model A, IG) ...")
-    sol = solve_general(IG, GAMMA, T, xi=GAMMA * IG["Delta"], N_t=7200)
+    sol = solve_general(IG, GAMMA, T, xi=GAMMA, N_t=7200) # * IG["Delta"]
 
     # Example liquidation penalty (choose and calibrate)
     #ℓ(∣q∣)=η∣q∣
