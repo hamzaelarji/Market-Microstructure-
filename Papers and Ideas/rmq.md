@@ -1,0 +1,1 @@
+Part 6 : we have directly the parameters (in params.py), computed from data of bnp. Ideally try to find open source data and try to calibrate the aprameters ot find something similar.
