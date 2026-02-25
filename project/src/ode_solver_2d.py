@@ -274,7 +274,7 @@ def _extract_quotes_2d(theta, grid, idx, N, xi,
 # ═══════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    from params import IG, HY, GAMMA, RHO, T
+    from asset.params import IG, HY, GAMMA, RHO, T
 
     print("Solving 2D Model A (ξ = γ)  — 81 grid points, 7200 steps ...")
     sol = solve_2d(IG, HY, GAMMA, RHO, T, xi=GAMMA, N_t=7200)

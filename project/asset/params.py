@@ -1,7 +1,9 @@
 """Parameters from Section 6 of Optimal Market Making (Guéant 2017).
 
-Model A : ξ = γ.Δ  (CARA utility → risk aversion on execution + price risk)
+Model A : ξ = γ  (CARA utility → risk aversion on execution + price risk)
 Model B : ξ = 0   (mean‐variance → only penalise inventory)
+
+In both models, ξΔ = ξ · Δ is the product entering the Hamiltonian.
 
 Notice : We might need to find data to retrieve these values later.
 """

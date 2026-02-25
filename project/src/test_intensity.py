@@ -1,10 +1,23 @@
 """Tests for intensity.py — verifies FOC and H values."""
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+import os
+import sys
+from pathlib import Path
+
+THIS_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = THIS_DIR.parent
+sys.path.insert(0, str(THIS_DIR))
+sys.path.insert(0, str(PROJECT_DIR))
 
 import numpy as np
 from intensity import Lambda, C_coeff, H_val, H_prime, H_second, delta_star
-from params import IG, HY, GAMMA
+
+try:
+    from asset.params import IG, HY, GAMMA
+except ImportError:
+    # If project params are not available, keep a minimal fallback.
+    IG = {'A': 1.0, 'k': 1.0, 'Delta': 1.0}
+    HY = {'A': 1.0, 'k': 1.0, 'Delta': 1.0}
+    GAMMA = 0.1
 
 def test_foc(xi, A, k, Delta, p_test, label=""):
     """Verify first‑order condition at δ*(p).
