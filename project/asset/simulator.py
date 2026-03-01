@@ -178,6 +178,13 @@ def simulate_naive(
     ell=None,
     return_utility=True,
 ):
+    """Simulate a naive market maker with constant symmetric spread.
+
+    Returns dict with keys matching simulate_1d interface:
+        pnl, inventory, cash, mtm, price, times, Delta,
+        n_bid_fills, n_ask_fills
+    Plus extras: pnl_paper, liquidation_penalty, terminal_wealth, utility.
+    """
     rng = np.random.default_rng(seed)
 
     sigma = params["sigma"]
@@ -189,10 +196,12 @@ def simulate_naive(
     dt = T / N_t
     times = np.linspace(0, T, N_t + 1)
 
-    price     = np.zeros((N_sim, N_t + 1))
-    cash      = np.zeros((N_sim, N_t + 1))
-    inv_lots  = np.zeros((N_sim, N_t + 1), dtype=int)
-    mtm       = np.zeros((N_sim, N_t + 1))
+    price       = np.zeros((N_sim, N_t + 1))
+    cash        = np.zeros((N_sim, N_t + 1))
+    inv_lots    = np.zeros((N_sim, N_t + 1), dtype=int)
+    mtm         = np.zeros((N_sim, N_t + 1))
+    n_bid_fills = np.zeros(N_sim, dtype=int)
+    n_ask_fills = np.zeros(N_sim, dtype=int)
 
     Z = rng.standard_normal((N_sim, N_t))
 
@@ -213,13 +222,13 @@ def simulate_naive(
         mtm[m, 0] = X + (n * Delta) * S
 
         for t_idx in range(N_t):
-            # Trades at S_t
             # Bid arrivals
             N_bid = rng.poisson(lam=lam * dt) if n < Q else 0
             if N_bid > 0:
                 N_exec = min(N_bid, Q - n)
                 X -= N_exec * (S - half_spread) * Delta
                 n += N_exec
+                n_bid_fills[m] += N_exec
 
             # Ask arrivals
             N_ask = rng.poisson(lam=lam * dt) if n > -Q else 0
@@ -227,6 +236,7 @@ def simulate_naive(
                 N_exec = min(N_ask, n - (-Q))
                 X += N_exec * (S + half_spread) * Delta
                 n -= N_exec
+                n_ask_fills[m] += N_exec
 
             # Price evolves after trades
             S += sigma * np.sqrt(dt) * Z[m, t_idx]
@@ -236,22 +246,27 @@ def simulate_naive(
             inv_lots[m, t_idx + 1] = n
             mtm[m, t_idx + 1] = X + (n * Delta) * S
 
-    qT_dollars = inv_lots[:, -1] * Delta
+    # ── Terminal P&L ──
+    qT_dollars = inv_lots[:, -1].astype(float) * Delta
     ST = price[:, -1]
     XT = cash[:, -1]
-    liquidation_penalty = np.array([ell(abs(q)) for q in qT_dollars], dtype=float)
+    pnl_mtm = XT + qT_dollars * ST
 
-    W_T = XT + qT_dollars * ST - liquidation_penalty
+    liquidation_penalty = np.array([ell(abs(q)) for q in qT_dollars], dtype=float)
+    W_T = pnl_mtm - liquidation_penalty
 
     out = dict(
-        pnl_mtm=XT + qT_dollars * ST,
-        pnl_paper=W_T,
+        pnl=pnl_mtm,                
+        n_bid_fills=n_bid_fills,     
+        n_ask_fills=n_ask_fills,     
         inventory=inv_lots,
         cash=cash,
         mtm=mtm,
         price=price,
         times=times,
         Delta=Delta,
+        pnl_mtm=pnl_mtm,
+        pnl_paper=W_T,
         liquidation_penalty=liquidation_penalty,
         terminal_wealth=W_T,
     )

@@ -5,7 +5,7 @@ Reproduces Figures 17–19 from Guéant (2017):
   - Fig 18: 3D surface  (n_IG, n_HY) → δ^{HY,bid}(0)
   - Fig 19: Cross‑section  n_IG → δ^{HY,bid}(0, n_IG, 0)  for ρ ∈ {0, 0.3, 0.6, 0.9}
 
-WARNING: The 2D solver is slow (~2 min per solve at N_t=720).
+WARNING: The 2D solver is slow (~20 min per solve at N_t=7200).
          Adjust N_t below if needed.
 
 Run:  python 04_multi_asset.py
