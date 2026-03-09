@@ -1,0 +1,11 @@
+numpy
+scipy
+pandas
+streamlit
+plotly
+matplotlib
+websockets
+requests
+
+[dev]
+pytest
