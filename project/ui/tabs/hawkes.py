@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from market_making.core.solver_1d import solve_general
+from ui.styles import hero_banner, section_header
 
 try:
     from market_making.core.hawkes import (
@@ -23,6 +24,11 @@ DEFAULT_GAMMA = 0.01
 def render_hawkes(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                   load_mid_prices, run_quick_mc):
     """Render Tab 7 — Hawkes vs Poisson: compare fill dynamics."""
+    hero_banner(
+        "⚡",
+        "Hawkes vs Poisson",
+        "Self-exciting order arrivals: compare clustering dynamics and P&L impact.",
+    )
     SYMBOLS = list(PARAMS.keys())
 
     if not HAWKES_AVAILABLE:

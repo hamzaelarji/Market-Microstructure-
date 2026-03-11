@@ -6,11 +6,17 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from market_making.data.calibrate import calibrate, estimate_intensity
+from ui.styles import hero_banner, section_header
 
 
 def render_calibration(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                        load_mid_prices, run_quick_mc):
     """Render Tab 4 — Calibration: show calibrated params and re-calibrate from CSV."""
+    hero_banner(
+        "📡",
+        "Calibration",
+        "View calibrated parameters (σ, A, k) and re-calibrate from uploaded trade data.",
+    )
     SYMBOLS = list(PARAMS.keys())
 
     if HAS_REAL_DATA:

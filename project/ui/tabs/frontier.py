@@ -6,10 +6,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
+from ui.styles import hero_banner, section_header
+
 
 def render_frontier(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                     load_mid_prices, run_quick_mc):
     """Render Tab 3 — Efficient Frontier: MC E[P&L] vs Std[P&L] for multiple γ values."""
+    hero_banner(
+        "📊",
+        "Efficient Frontier",
+        "Risk-return trade-off: sweep γ to trace the market maker's efficient frontier.",
+    )
+
     SYMBOLS = list(PARAMS.keys())
 
     st.caption(

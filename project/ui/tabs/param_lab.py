@@ -8,13 +8,19 @@ import streamlit as st
 from market_making.core.solver_1d import solve_general
 from market_making.core.closed_form import approx_quotes
 from market_making.core.intensity import C_coeff
+from ui.styles import hero_banner, section_header
 
 DEFAULT_GAMMA = 0.01
 
 
 def render_param_lab(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                      load_mid_prices, run_quick_mc):
-    """Render Tab 1 — Parameter Lab: ODE quotes, 3D surface, Model A vs B."""
+    """Render Tab 1 — Quote Lab: ODE quotes, 3D surface, Model A vs B."""
+    hero_banner(
+        "🔬",
+        "Quote Lab",
+        "Explore ODE-optimal quotes vs closed-form approximation. Compare Model A (ξ=γ) and Model B (ξ=0).",
+    )
     SYMBOLS = list(PARAMS.keys())
 
     c_ctrl, c_viz = st.columns([1, 3])

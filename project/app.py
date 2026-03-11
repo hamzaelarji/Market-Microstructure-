@@ -1,16 +1,8 @@
 """Optimal Market Making Dashboard.
 
-Run:  streamlit run app.py
+Implements Guéant–Lehalle–Fernandez-Tapia (2017) framework.
 
-Tabs:
-  1. Parameter Lab      — ODE quotes, 3D surface, Model A vs B
-  2. γ Sensitivity       — sweep γ → spread, skew, fill rate
-  3. Efficient Frontier  — MC E[P&L] vs Std[P&L] for 12 γ values
-  4. Calibration         — show calibrated params / re-calibrate
-  5. Backtest            — MC backtest, strategy comparison
-  6. Intraday Regimes    — static vs regime-aware policy
-  7. Hawkes vs Poisson   — compare fill dynamics
-  8. Paper Trading       — simulated live trading
+Run:  streamlit run app.py
 """
 
 import streamlit as st
@@ -18,73 +10,92 @@ import streamlit as st
 from ui.styles import PALETTE, PLOT_KW, apply_styles, show
 from ui.loaders import load_calibrated_params, load_mid_prices, run_quick_mc
 
-from ui.tabs.param_lab import render_param_lab
-from ui.tabs.sensitivity import render_sensitivity
-from ui.tabs.frontier import render_frontier
-from ui.tabs.calibration import render_calibration
-from ui.tabs.backtest import render_backtest
-from ui.tabs.regimes import render_regimes
-from ui.tabs.hawkes import render_hawkes
+from ui.tabs.param_lab     import render_param_lab
+from ui.tabs.sensitivity   import render_sensitivity
+from ui.tabs.frontier      import render_frontier
+from ui.tabs.calibration   import render_calibration
+from ui.tabs.backtest      import render_backtest
+from ui.tabs.regimes       import render_regimes
+from ui.tabs.hawkes        import render_hawkes
 from ui.tabs.paper_trading import render_paper_trading
+from ui.tabs.live_sim      import render_live_sim
 
-# ─── Page config ──────────────────────────────────────────
+# ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Market Making",
+    page_title="Optimal Market Making",
     page_icon="◈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 apply_styles()
 
-# ─── Load data ────────────────────────────────────────────
-PARAMS, META, HAS_REAL_DATA = load_calibrated_params()
-SYMBOLS = list(PARAMS.keys())
+# ─── Sidebar ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown(
+        '<div class="sidebar-logo">◈ Optimal MM</div>',
+        unsafe_allow_html=True,
+    )
 
-# ─── Header ──────────────────────────────────────────────
-h1, h2 = st.columns([4, 1])
-h1.markdown("### ◈ Optimal Market Making")
-if HAS_REAL_DATA and SYMBOLS:
-    m = META.get(SYMBOLS[0], {})
-    h2.caption(f"Calibrated {m.get('calibration_date','—')} · {m.get('n_days','—')}d · "
-               f"R²={m.get('r_squared','—')}")
-else:
-    h2.caption("⚠ Fallback params — run notebook 11")
+    _ctx_data = load_calibrated_params()
+    PARAMS, META, HAS_REAL_DATA = _ctx_data
+    SYMBOLS = list(PARAMS.keys())
 
-# ─── Tabs ─────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "Parameter Lab",
-    "γ Sensitivity",
-    "Efficient Frontier",
-    "Calibration",
-    "Backtest",
-    "Intraday Regimes",
-    "Hawkes vs Poisson",
-    "Paper Trading",
-])
+    if HAS_REAL_DATA and SYMBOLS:
+        m0 = META.get(SYMBOLS[0], {})
+        st.caption(
+            f"✓ Calibrated · {m0.get('calibration_date','—')}  \n"
+            f"R² = {m0.get('r_squared','—')} · {m0.get('n_days','—')} days"
+        )
+    else:
+        st.warning("Fallback params — run notebook 11", icon="⚠")
 
+    st.divider()
+
+    NAV = st.radio(
+        "Navigation",
+        [
+            "🔬  Quote Lab",
+            "🎬  Live Simulation",
+            "⚔️  Strategy Battle",
+            "📊  Efficient Frontier",
+            "🌡️  Sensitivity Atlas",
+            "⚡  Hawkes vs Poisson",
+            "🔄  Intraday Regimes",
+            "📡  Calibration",
+            "📈  Paper Trading",
+        ],
+        label_visibility="collapsed",
+    )
+
+    st.markdown(
+        '<div class="sidebar-cite">'
+        'Guéant, Lehalle & Fernandez-Tapia (2017)<br>'
+        '<em>Optimal Market Making</em><br>'
+        'Applied Mathematical Finance 24(2)'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+# ─── Context bundle ───────────────────────────────────────────────────────────
 _ctx = (PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
         load_mid_prices, run_quick_mc)
 
-with tab1:
+# ─── Router ───────────────────────────────────────────────────────────────────
+if "Quote Lab" in NAV:
     render_param_lab(*_ctx)
-
-with tab2:
-    render_sensitivity(*_ctx)
-
-with tab3:
-    render_frontier(*_ctx)
-
-with tab4:
-    render_calibration(*_ctx)
-
-with tab5:
+elif "Live Simulation" in NAV:
+    render_live_sim(*_ctx)
+elif "Strategy Battle" in NAV:
     render_backtest(*_ctx)
-
-with tab6:
-    render_regimes(*_ctx)
-
-with tab7:
+elif "Efficient Frontier" in NAV:
+    render_frontier(*_ctx)
+elif "Sensitivity Atlas" in NAV:
+    render_sensitivity(*_ctx)
+elif "Hawkes vs Poisson" in NAV:
     render_hawkes(*_ctx)
-
-with tab8:
+elif "Intraday Regimes" in NAV:
+    render_regimes(*_ctx)
+elif "Calibration" in NAV:
+    render_calibration(*_ctx)
+elif "Paper Trading" in NAV:
     render_paper_trading(*_ctx)
