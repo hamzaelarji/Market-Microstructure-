@@ -25,77 +25,65 @@ st.set_page_config(
     page_title="Optimal Market Making",
     page_icon="◈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 apply_styles()
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown(
-        '<div class="sidebar-logo">◈ Optimal MM</div>',
-        unsafe_allow_html=True,
+# ─── Load data ────────────────────────────────────────────────────────────────
+PARAMS, META, HAS_REAL_DATA = load_calibrated_params()
+SYMBOLS = list(PARAMS.keys())
+
+# ─── Header ───────────────────────────────────────────────────────────────────
+h1, h2 = st.columns([4, 1])
+h1.markdown("### ◈ Optimal Market Making")
+if HAS_REAL_DATA and SYMBOLS:
+    m = META.get(SYMBOLS[0], {})
+    h2.caption(
+        f"Calibrated {m.get('calibration_date','—')} · {m.get('n_days','—')}d · "
+        f"R²={m.get('r_squared','—')}"
     )
+else:
+    h2.caption("⚠ Fallback params — run notebook 11")
 
-    _ctx_data = load_calibrated_params()
-    PARAMS, META, HAS_REAL_DATA = _ctx_data
-    SYMBOLS = list(PARAMS.keys())
+# ─── Tabs ─────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "🔬 Quote Lab",
+    "🎬 Live Simulation",
+    "⚔️ Strategy Battle",
+    "📊 Efficient Frontier",
+    "🌡️ Sensitivity Atlas",
+    "⚡ Hawkes vs Poisson",
+    "🔄 Intraday Regimes",
+    "📡 Calibration",
+    "📈 Paper Trading",
+])
 
-    if HAS_REAL_DATA and SYMBOLS:
-        m0 = META.get(SYMBOLS[0], {})
-        st.caption(
-            f"✓ Calibrated · {m0.get('calibration_date','—')}  \n"
-            f"R² = {m0.get('r_squared','—')} · {m0.get('n_days','—')} days"
-        )
-    else:
-        st.warning("Fallback params — run notebook 11", icon="⚠")
-
-    st.divider()
-
-    NAV = st.radio(
-        "Navigation",
-        [
-            "🔬  Quote Lab",
-            "🎬  Live Simulation",
-            "⚔️  Strategy Battle",
-            "📊  Efficient Frontier",
-            "🌡️  Sensitivity Atlas",
-            "⚡  Hawkes vs Poisson",
-            "🔄  Intraday Regimes",
-            "📡  Calibration",
-            "📈  Paper Trading",
-        ],
-        label_visibility="collapsed",
-    )
-
-    st.markdown(
-        '<div class="sidebar-cite">'
-        'Guéant, Lehalle & Fernandez-Tapia (2017)<br>'
-        '<em>Optimal Market Making</em><br>'
-        'Applied Mathematical Finance 24(2)'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-# ─── Context bundle ───────────────────────────────────────────────────────────
 _ctx = (PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
         load_mid_prices, run_quick_mc)
 
-# ─── Router ───────────────────────────────────────────────────────────────────
-if "Quote Lab" in NAV:
+with tab1:
     render_param_lab(*_ctx)
-elif "Live Simulation" in NAV:
+
+with tab2:
     render_live_sim(*_ctx)
-elif "Strategy Battle" in NAV:
+
+with tab3:
     render_backtest(*_ctx)
-elif "Efficient Frontier" in NAV:
+
+with tab4:
     render_frontier(*_ctx)
-elif "Sensitivity Atlas" in NAV:
+
+with tab5:
     render_sensitivity(*_ctx)
-elif "Hawkes vs Poisson" in NAV:
+
+with tab6:
     render_hawkes(*_ctx)
-elif "Intraday Regimes" in NAV:
+
+with tab7:
     render_regimes(*_ctx)
-elif "Calibration" in NAV:
+
+with tab8:
     render_calibration(*_ctx)
-elif "Paper Trading" in NAV:
+
+with tab9:
     render_paper_trading(*_ctx)
