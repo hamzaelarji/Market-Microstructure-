@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from market_making.core.solver_1d import solve_general
+from ui.styles import hero_banner, section_header
 
 DEFAULT_GAMMA = 0.01
 
@@ -14,6 +15,11 @@ DEFAULT_GAMMA = 0.01
 def render_regimes(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                    load_mid_prices, run_quick_mc):
     """Render Tab 6 — Intraday Regimes: static vs regime-aware policy comparison."""
+    hero_banner(
+        "🔄",
+        "Intraday Regimes",
+        "Compare static vs regime-adaptive quoting across low/medium/high volatility periods.",
+    )
     SYMBOLS = list(PARAMS.keys())
 
     st.caption(

@@ -7,6 +7,7 @@ import streamlit as st
 
 from market_making.data.calibrate import compute_mid_price
 from market_making.bot.paper_trader import PaperTrader
+from ui.styles import hero_banner
 
 DEFAULT_GAMMA = 0.01
 
@@ -14,6 +15,11 @@ DEFAULT_GAMMA = 0.01
 def render_paper_trading(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
                          load_mid_prices, run_quick_mc):
     """Render Tab 8 — Paper Trading: simulated live trading session."""
+    hero_banner(
+        "📈",
+        "Paper Trading",
+        "Simulated live market-making session using the optimal quoting policy.",
+    )
     SYMBOLS = list(PARAMS.keys())
 
     c_pt, c_out = st.columns([1, 3])
