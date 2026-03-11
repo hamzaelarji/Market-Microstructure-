@@ -9,7 +9,7 @@ import streamlit as st
 
 from market_making.simulation.backtest import BacktestConfig, run_backtest
 
-CALIBRATED_PATH = Path("data/calibrated/calibrated_params.json")
+CALIBRATED_PATH = Path("data/data/calibrated/calibrated_params.json")
 
 
 @st.cache_data
@@ -44,7 +44,7 @@ def load_calibrated_params():
 
 @st.cache_data
 def load_mid_prices(symbol):
-    p = Path(f"data/calibrated/mid_prices_{symbol}.parquet")
+    p = Path(f"data/data/calibrated/mid_prices_{symbol}.parquet")
     if p.exists():
         return pd.read_parquet(p)["mid_price"]
     return None

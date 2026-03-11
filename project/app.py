@@ -33,6 +33,7 @@ apply_styles()
 PARAMS, META, HAS_REAL_DATA = load_calibrated_params()
 SYMBOLS = list(PARAMS.keys())
 
+
 # ─── Header ───────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([4, 1])
 h1.markdown("### ◈ Optimal Market Making")

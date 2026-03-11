@@ -365,12 +365,19 @@ def render_live_sim(PARAMS, META, HAS_REAL_DATA, PALETTE, PLOT_KW, show,
         sigma2 = p["sigma"] ** 2
         qDelta2 = (p["Q"] * p["Delta"]) ** 2
         gamma_safe_max = 0.1 / max(sigma2 * qDelta2, 1e-20)
-        gamma_default = min(1e-2, max(1e-6, gamma_safe_max * 0.01))
+        gamma_min = 1e-8
+        gamma_min_ui = min(gamma_min, gamma_safe_max)
+        gamma_default_raw = gamma_safe_max * 0.01
+        gamma_default = min(max(gamma_default_raw, gamma_min_ui), gamma_safe_max)
+        gamma_step = max(gamma_default, gamma_safe_max / 100)
 
         gamma = st.number_input(
-            "γ  (risk aversion)", value=float(f"{gamma_default:.2e}"),
-            min_value=1e-8, max_value=float(gamma_safe_max),
-            format="%.2e", step=float(gamma_default),
+            "γ  (risk aversion)",
+            value=float(gamma_default),
+            min_value=float(gamma_min_ui),
+            max_value=float(gamma_safe_max),
+            format="%.2e",
+            step=float(gamma_step),
             key="ls_gamma",
             help=f"Safe range for these params: γ ≤ {gamma_safe_max:.1e}",
         )

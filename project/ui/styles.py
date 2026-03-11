@@ -30,7 +30,7 @@ _CSS = """
 
 /* ── Base & layout ── */
 #MainMenu, footer { visibility: hidden; }
-.block-container { padding-top: 0.8rem; padding-bottom: 1rem; max-width: 1400px; }
+.block-container { padding-top: 3rem; padding-bottom: 1rem; max-width: 1400px; }
 html, body, [class*="css"] { font-family: 'Inter', 'Segoe UI', sans-serif; }
 
 /* ── Tabs (top-level) ── */
