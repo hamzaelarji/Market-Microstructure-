@@ -16,3 +16,6 @@ venv/
 **/*.xlsx
 **/*.xls
 **/*.xlsm
+
+*.tmp
+*.tkl
