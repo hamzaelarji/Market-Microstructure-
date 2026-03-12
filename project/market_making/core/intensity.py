@@ -69,4 +69,6 @@ def fill_prob(lam: float, dt: float) -> float:
 
     Plus précis que l'approximation linéaire λ·dt aux fortes intensités.
     """
-    return 1.0 - np.exp(-max(float(lam), 0.0) * dt)
+    lam = np.asarray(lam, dtype=float)
+    out = 1.0 - np.exp(-np.maximum(lam, 0.0) * dt)
+    return float(out) if out.ndim == 0 else out
