@@ -34,6 +34,18 @@ def compute_mid_price(trades: pd.DataFrame, freq: str = "1s") -> pd.Series:
     volume = trades["quantity"].resample(freq).sum()
     return (notional / volume).dropna()
 
+def compute_mid_price_tick(df: pd.DataFrame) -> pd.Series:
+    """
+    Estimate mid price tick-by-tick using buyer/seller alternation.
+    Buyer-maker = sell aggressor → price is near ask.
+    Seller-maker = buy aggressor → price is near bid.
+    Mid ≈ rolling mean of consecutive bid/ask prices.
+    """
+    df = df.sort_values("timestamp").copy()
+    # Simple proxy: mid = rolling 2-trade mean price
+    df["mid"] = df["price"].rolling(2, min_periods=1).mean()
+    return df.set_index("timestamp")["mid"]
+
 
 def estimate_sigma(trades: pd.DataFrame, freq: str = "1s") -> float:
     """σ = std(ΔS) / √dt in $/√s."""
