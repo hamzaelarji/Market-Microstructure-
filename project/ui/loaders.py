@@ -44,9 +44,9 @@ def load_calibrated_params():
 
 @st.cache_data
 def load_mid_prices(symbol):
-    p = Path(f"data/data/calibrated/mid_prices_{symbol}.parquet")
+    p = Path(f"data/data/calibrated/mid_prices_{symbol}.csv")
     if p.exists():
-        return pd.read_parquet(p)["mid_price"]
+        return pd.read_csv(p, index_col=0, parse_dates=True)["mid_price"]
     return None
 
 
