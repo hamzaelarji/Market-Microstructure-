@@ -1,0 +1,758 @@
+!pip install -q stable-baselines3[extra] gymnasium numpy matplotlib
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+import os
+SAVE_PATH = "/content/drive/MyDrive/hawkes_mm_v2"
+os.makedirs(SAVE_PATH, exist_ok=True)
+print(f"Sauvegarde dans : {SAVE_PATH}")
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import gymnasium as gym
+from gymnasium import spaces
+
+class MarketSimulatorWithHawkes:
+    """
+    Hawkes exponentiel bivarié — forme multiplicative.
+
+    Intensité :
+        lambda^b = A * exp(-k * delta_b) * (1 + y_b)
+        lambda^a = A * exp(-k * delta_a) * (1 + y_a)
+
+    Dynamique (ordre corrigé : décroissance → intensité → excitation) :
+        1. y décroît  :  y *= exp(-beta * dt)
+        2. intensité  :  lam = A * exp(-k*delta) * (1+y)
+        3. tirage     :  dN ~ Bernoulli(lam * dt)
+        4. excitation :  y += alpha * dN
+
+    Stabilité : rho(K) < 1 avec K = [[alpha_bb, alpha_ba],
+                                      [alpha_ab, alpha_aa]] / beta
+    """
+
+    def __init__(self, alpha_bb=0.3, alpha_aa=0.3,
+                 alpha_ab=0.0, alpha_ba=0.0,
+                 beta=1.5, A=1.0, k=1.5):
+
+        self.alpha_bb = alpha_bb
+        self.alpha_aa = alpha_aa
+        self.alpha_ab = alpha_ab
+        self.alpha_ba = alpha_ba
+        self.beta     = beta
+        self.A        = A
+        self.k        = k
+
+        # ── Vérification de stabilité ──
+        K = np.array([
+            [alpha_bb / beta, alpha_ba / beta],
+            [alpha_ab / beta, alpha_aa / beta]
+        ])
+        rho = np.max(np.abs(np.linalg.eigvals(K)))
+        assert rho < 1, f"Hawkes instable — rho(K)={rho:.3f} >= 1"
+        self.spectral_radius = rho
+
+        self.reset()
+
+    def reset(self):
+        self.y_b = 0.0
+        self.y_a = 0.0
+
+    def intensity_bid(self, delta_b):
+        return self.A * np.exp(-self.k * delta_b) * (1.0 + self.y_b)
+
+    def intensity_ask(self, delta_a):
+        return self.A * np.exp(-self.k * delta_a) * (1.0 + self.y_a)
+
+    def step(self, delta_b, delta_a, dt):
+        # ── 1. Décroissance AVANT le calcul d'intensité ──
+        self.y_b *= np.exp(-self.beta * dt)
+        self.y_a *= np.exp(-self.beta * dt)
+
+        # ── 2. Intensités avec y déjà décru ──
+        lam_b = self.intensity_bid(delta_b)
+        lam_a = self.intensity_ask(delta_a)
+
+        # ── 3. Clamp de sécurité (approximation Bernoulli valide ssi lam*dt < 1) ──
+        prob_b = min(lam_b * dt, 0.99)
+        prob_a = min(lam_a * dt, 0.99)
+
+        dN_b = int(np.random.rand() < prob_b)
+        dN_a = int(np.random.rand() < prob_a)
+
+        # ── 4. Excitation APRÈS le tirage ──
+        self.y_b += self.alpha_bb * dN_b + self.alpha_ba * dN_a
+        self.y_a += self.alpha_aa * dN_a + self.alpha_ab * dN_b
+
+        return dN_b, dN_a
+
+
+# ── Test du simulateur Hawkes ──
+np.random.seed(42)
+sim = MarketSimulatorWithHawkes(alpha_bb=0.3, alpha_aa=0.3, beta=1.5, A=1.0, k=1.5)
+
+dt = 0.05
+steps = 400
+delta_b = delta_a = 0.5
+
+y_b_hist, y_a_hist = [], []
+lam_b_hist, lam_a_hist = [], []
+
+for _ in range(steps):
+    sim.step(delta_b, delta_a, dt)
+    y_b_hist.append(sim.y_b)
+    y_a_hist.append(sim.y_a)
+    lam_b_hist.append(sim.intensity_bid(delta_b))
+    lam_a_hist.append(sim.intensity_ask(delta_a))
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+
+axes[0].plot(y_b_hist, label='$y^b$', color='blue', alpha=0.8)
+axes[0].plot(y_a_hist, label='$y^a$', color='red', alpha=0.8)
+axes[0].set_ylabel('Composante Hawkes')
+axes[0].set_title('Auto-excitation $y^b$ et $y^a$')
+axes[0].legend()
+
+axes[1].plot(lam_b_hist, label='$\\lambda^b$ total', color='blue', alpha=0.8)
+axes[1].plot(lam_a_hist, label='$\\lambda^a$ total', color='red', alpha=0.8)
+axes[1].axhline(sim.A * np.exp(-sim.k * delta_b),
+                color='gray', linestyle='--', label='baseline $\\Lambda(\\delta)$')
+axes[1].set_ylabel('Intensité totale')
+axes[1].set_xlabel('Pas de temps')
+# CORRIGÉ : forme multiplicative, pas additive
+axes[1].set_title('Intensités effectives $\\lambda = \\Lambda(\\delta) \\cdot (1+y)$')
+axes[1].legend()
+
+plt.tight_layout()
+plt.savefig(f"{SAVE_PATH}/hawkes_test.png", dpi=150)
+plt.show()
+
+baseline = sim.A * np.exp(-sim.k * delta_b)
+print(f"Intensité baseline Λ(δ={delta_b}) : {baseline:.4f}")
+print(f"Rayon spectral ρ(K) : {sim.spectral_radius:.3f}")
+print(f"y^b final : {sim.y_b:.4f},  y^a final : {sim.y_a:.4f}")
+print(f"Max λ·dt observé : {max(max(lam_b_hist), max(lam_a_hist))*dt:.4f}")
+
+
+class MarketMakingEnv(gym.Env):
+    """
+    Environnement de market making — Model B de Guéant avec Hawkes.
+
+    Corrections v2 :
+    - Normalisation y_max calibrée empiriquement
+    - Reward scaling pour que la pénalité d'inventaire soit perceptible
+    - Tracking de métriques supplémentaires (trades, spread moyen)
+    """
+
+    def __init__(self, T=100, dt=0.05, sigma=0.3, gamma=0.1,
+                 Q=5, alpha_bb=0.3, alpha_aa=0.3,
+                 alpha_ab=0.0, alpha_ba=0.0,
+                 beta=1.5, A=1.0, k=1.5,
+                 delta_min=0.01, delta_max=2.0, liq_penalty=0.5):
+
+        super().__init__()
+        self.T           = T
+        self.dt          = dt
+        self.sigma       = sigma
+        self.gamma       = gamma
+        self.Q           = Q
+        self.delta_min   = delta_min
+        self.delta_max   = delta_max
+        self.liq_penalty = liq_penalty
+
+        self.hawkes = MarketSimulatorWithHawkes(
+            alpha_bb=alpha_bb, alpha_aa=alpha_aa,
+            alpha_ab=alpha_ab, alpha_ba=alpha_ba,
+            beta=beta, A=A, k=k
+        )
+
+        # ── y_max : calibré pour normaliser raisonnablement ──
+        # On estime le y moyen en régime stationnaire pour un delta "typique"
+        # Pour un Hawkes exponentiel 1D : E[y] ≈ alpha * lambda_infty / (beta - alpha * lambda_infty)
+        # avec lambda_infty = A * exp(-k * delta_typique) * (1 + E[y])
+        # En première approximation, delta_typique ≈ (delta_min + delta_max) / 2
+        delta_typ = (delta_min + delta_max) / 2
+        lam_base  = A * np.exp(-k * delta_typ)
+        # Résolution approchée : E[y] ≈ alpha * lam_base / (beta - alpha * lam_base)
+        denom = beta - alpha_bb * lam_base
+        y_mean = alpha_bb * lam_base / max(denom, 1e-8)
+        self.y_max = max(y_mean * 8, 1.0)
+        print(f"[Env] y_max = {self.y_max:.3f} (y_mean ≈ {y_mean:.4f})")
+
+        # ── Espaces ──
+        self.action_space = spaces.Box(
+            low=np.array([-1.0, -1.0], dtype=np.float32),
+            high=np.array([1.0,  1.0], dtype=np.float32),
+        )
+        self.observation_space = spaces.Box(
+            low=np.array( [0.0, -1.0, 0.0, 0.0], dtype=np.float32),
+            high=np.array([1.0,  1.0, 5.0, 5.0], dtype=np.float32),
+        )
+
+    def _get_state(self):
+        return np.array([
+            self.t / self.T,
+            self.q / self.Q,
+            np.clip(self.hawkes.y_b / self.y_max, 0.0, 5.0),
+            np.clip(self.hawkes.y_a / self.y_max, 0.0, 5.0),
+        ], dtype=np.float32)
+
+    def _denormalize_action(self, action):
+        delta_b = self.delta_min + (action[0] + 1) / 2 \
+                  * (self.delta_max - self.delta_min)
+        delta_a = self.delta_min + (action[1] + 1) / 2 \
+                  * (self.delta_max - self.delta_min)
+        delta_b = np.clip(delta_b, self.delta_min, self.delta_max)
+        delta_a = np.clip(delta_a, self.delta_min, self.delta_max)
+        return float(delta_b), float(delta_a)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.t   = 0.0
+        self.S   = 100.0
+        self.q   = 0
+        self.X   = 0.0
+        self.pnl = 0.0
+        self.hawkes.reset()
+        # Métriques de suivi
+        self.n_buys  = 0
+        self.n_sells = 0
+        self.spread_sum = 0.0
+        self.spread_n   = 0
+        return self._get_state(), {}
+
+    def step(self, action):
+        delta_b, delta_a = self._denormalize_action(action)
+
+        # ── Contraintes d'inventaire (Eq. 2.3 de Guéant : 1_{q<Q}) ──
+        if self.q >= self.Q:
+            delta_b = self.delta_max   # on refuse d'acheter
+        if self.q <= -self.Q:
+            delta_a = self.delta_max   # on refuse de vendre
+
+        S_old = self.S
+
+        # ── Simulation Hawkes ──
+        dN_b, dN_a = self.hawkes.step(delta_b, delta_a, self.dt)
+
+        # ── Fills avec respect des bornes d'inventaire ──
+        fills_b = max(min(dN_b, self.Q - self.q), 0)
+        fills_a = max(min(dN_a, self.Q + self.q), 0)
+
+        # ── Mise à jour inventaire et cash (Eq. 2.2 et 2.4 de Guéant) ──
+        self.q += fills_b - fills_a
+        self.X -= fills_b * (S_old - delta_b)   # on achète à S - δ_b
+        self.X += fills_a * (S_old + delta_a)    # on vend à   S + δ_a
+
+        # ── Mouvement du prix de référence (Eq. 2.1 : dS = σ dW) ──
+        self.S += self.sigma * np.sqrt(self.dt) * np.random.randn()
+
+        # ── Reward Model B : d(PnL) - ½γσ²q²dt ──
+        pnl_new = self.X + self.q * self.S
+        reward  = (pnl_new - self.pnl) \
+                  - 0.5 * self.gamma * (self.sigma**2) * (self.q**2) * self.dt
+        self.pnl = pnl_new
+        self.t  += self.dt
+        done     = self.t >= self.T
+
+        # ── Pénalité terminale ℓ(|q_T|) ──
+        if done:
+            reward -= self.liq_penalty * (self.q ** 2)
+
+        # ── Métriques de suivi ──
+        self.n_buys  += fills_b
+        self.n_sells += fills_a
+        self.spread_sum += delta_b + delta_a
+        self.spread_n   += 1
+
+        return self._get_state(), float(reward), done, False, {}
+
+    @property
+    def avg_spread(self):
+        return self.spread_sum / max(self.spread_n, 1)
+
+
+# ── Test de l'environnement avec actions aléatoires ──
+env = MarketMakingEnv()
+obs, _ = env.reset(seed=42)
+
+rewards, inventories, pnls, y_bs = [], [], [], []
+
+while True:
+    action = env.action_space.sample()
+    obs, reward, done, _, _ = env.step(action)
+    rewards.append(reward)
+    inventories.append(env.q)
+    pnls.append(env.pnl)
+    y_bs.append(env.hawkes.y_b)
+    if done:
+        break
+
+print(f"Steps          : {len(rewards)}")
+print(f"PnL final      : {pnls[-1]:.4f}")
+print(f"Inventaire fin : {env.q}")
+print(f"Trades (buy/sell) : {env.n_buys} / {env.n_sells}")
+print(f"Spread moyen   : {env.avg_spread:.4f}")
+print(f"Reward moyen   : {np.mean(rewards):.6f}")
+print(f"Reward total   : {np.sum(rewards):.4f}")
+
+fig, axes = plt.subplots(4, 1, figsize=(14, 10), sharex=True)
+
+axes[0].plot(pnls, color='green')
+axes[0].set_ylabel('PnL')
+axes[0].set_title('PnL mark-to-market (actions aléatoires)')
+
+axes[1].plot(inventories, color='blue')
+axes[1].axhline(0, color='gray', linestyle='--')
+axes[1].axhline(env.Q,  color='red', linestyle=':', alpha=0.5, label='±Q')
+axes[1].axhline(-env.Q, color='red', linestyle=':', alpha=0.5)
+axes[1].set_ylabel('Inventaire q')
+axes[1].set_title('Inventaire')
+axes[1].legend()
+
+axes[2].plot(rewards, color='orange', alpha=0.7)
+axes[2].axhline(0, color='gray', linestyle='--')
+axes[2].set_ylabel('Reward')
+axes[2].set_title('Reward par step')
+
+axes[3].plot(y_bs, color='purple', alpha=0.7)
+axes[3].set_ylabel('$y^b$')
+axes[3].set_title('Composante Hawkes bid')
+axes[3].set_xlabel('Pas de temps')
+
+plt.tight_layout()
+plt.savefig(f"{SAVE_PATH}/env_test_random.png", dpi=150)
+plt.show()
+
+
+from stable_baselines3 import SAC
+from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.callbacks import BaseCallback
+import time
+
+# ── Learning rate adaptatif ──
+def linear_schedule(initial_lr, final_lr=1e-5):
+    def schedule(progress):
+        # progress : 1.0 → 0.0 au cours de l'entraînement
+        return final_lr + progress * (initial_lr - final_lr)
+    return schedule
+
+class TrainingCallback(BaseCallback):
+    def __init__(self, check_freq=10_000):
+        super().__init__()
+        self.check_freq       = check_freq
+        self.episode_rewards  = []
+        self.current_rewards  = []
+        self.best_mean_reward = -np.inf
+        self.last_printed     = -1
+        self.reward_history   = []  # pour le plot
+
+    def _on_step(self):
+        self.current_rewards.append(self.locals['rewards'][0])
+        if self.locals['dones'][0]:
+            ep_reward = sum(self.current_rewards)
+            self.episode_rewards.append(ep_reward)
+            self.current_rewards = []
+
+        if (self.n_calls % self.check_freq == 0
+                and self.n_calls != self.last_printed
+                and len(self.episode_rewards) >= 10):
+
+            self.last_printed = self.n_calls
+            mean_r  = np.mean(self.episode_rewards[-20:])
+            self.reward_history.append((self.n_calls, mean_r))
+            current_lr = self.model.learning_rate(
+                1 - self.n_calls / self.locals['total_timesteps']
+            )
+            print(f"  Step {self.n_calls:>7} | "
+                  f"Mean reward (20 ep) : {mean_r:>8.2f} | "
+                  f"lr : {current_lr:.2e}", end="")
+
+            if mean_r > self.best_mean_reward:
+                self.best_mean_reward = mean_r
+                self.model.save(f"{SAVE_PATH}/best_model")
+                print("  ★ best", end="")
+            print()
+        return True
+
+# ── Vérification de l'environnement ──
+env = MarketMakingEnv()
+check_env(env, warn=True)
+print("check_env OK")
+
+
+# ── Configuration et entraînement ──
+TOTAL_TIMESTEPS = 600_000
+
+env = MarketMakingEnv()
+
+model = SAC(
+    "MlpPolicy", env,
+    verbose=0,
+    gamma=1.0,                # pas d'actualisation (horizon fini)
+    batch_size=512,
+    learning_rate=linear_schedule(3e-4, final_lr=1e-5),
+    policy_kwargs=dict(net_arch=[128, 128]),
+    buffer_size=300_000,
+    learning_starts=5_000,
+    tau=0.005,
+    ent_coef='auto',
+    seed=42,
+)
+
+callback = TrainingCallback(check_freq=10_000)
+
+t0 = time.time()
+model.learn(
+    total_timesteps=TOTAL_TIMESTEPS,
+    callback=callback,
+    progress_bar=True,
+)
+print(f"\nEntraînement terminé en {time.time()-t0:.0f}s")
+
+# ── Charger le meilleur modèle ──
+model = SAC.load(f"{SAVE_PATH}/best_model", env=env)
+print(f"Meilleur reward moyen : {callback.best_mean_reward:.2f}")
+
+
+# ── Courbe d'apprentissage ──
+if callback.reward_history:
+    steps_h, rewards_h = zip(*callback.reward_history)
+    plt.figure(figsize=(12, 4))
+    plt.plot(steps_h, rewards_h, '-o', markersize=3)
+    plt.xlabel('Timesteps')
+    plt.ylabel('Mean episode reward (20 ep)')
+    plt.title('Courbe d\'apprentissage SAC')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"{SAVE_PATH}/learning_curve.png", dpi=150)
+    plt.show()
+
+
+def glft_model_b(q, sigma, gamma, k, A_eff, Delta=1.0):
+    """
+    Approximations fermées du Model B (ξ=0) — Eq. 4.6-4.7 de Guéant.
+
+    Pour des intensités exponentielles Λ(δ) = A_eff * exp(-kδ) :
+        δ_b = 1/k + (2q+Δ)/2 * sqrt(γσ²e / (2 A_eff Δ k))
+        δ_a = 1/k - (2q-Δ)/2 * sqrt(γσ²e / (2 A_eff Δ k))
+
+    Paramètres
+    ----------
+    A_eff : intensité effective (= A pour Poisson, = A*(1+y) pour Hawkes myope)
+    """
+    term1 = 1.0 / k
+    risk_term = np.sqrt(gamma * sigma**2 * np.e / (2.0 * A_eff * Delta * k + 1e-12))
+
+    delta_b = term1 + (2*q + Delta) / 2.0 * risk_term
+    delta_a = term1 - (2*q - Delta) / 2.0 * risk_term
+    return max(float(delta_b), 1e-4), max(float(delta_a), 1e-4)
+
+
+def backtest_comparison(model, env_params, n_episodes=500):
+    """Backtest avec 4 stratégies sur les mêmes seeds."""
+
+    def to_action(db, da, delta_min, delta_max):
+        def norm(d):
+            return float(np.clip(
+                2*(d - delta_min)/(delta_max - delta_min) - 1, -1.0, 1.0))
+        return np.array([norm(db), norm(da)], dtype=np.float32)
+
+    strategies = ['SAC', 'GLFT-Hawkes (myope)', 'GLFT-Poisson', 'Random']
+    colors     = {
+        'SAC':                  'blue',
+        'GLFT-Hawkes (myope)':  'green',
+        'GLFT-Poisson':         'orange',
+        'Random':               'gray',
+    }
+    results = {s: {'pnl': [], 'inv_final': [], 'inv_mean': [],
+                   'n_trades': [], 'spread_mean': []}
+               for s in strategies}
+
+    for ep in range(n_episodes):
+        for strategy in strategies:
+            env    = MarketMakingEnv(**env_params)
+            obs, _ = env.reset(seed=ep)   # même seed pour comparaison
+
+            inv_abs_sum, inv_count = 0, 0
+
+            while True:
+                if strategy == 'SAC':
+                    action, _ = model.predict(obs, deterministic=True)
+
+                elif strategy == 'GLFT-Hawkes (myope)':
+                    A_eff_b = env.hawkes.A * (1.0 + env.hawkes.y_b)
+                    A_eff_a = env.hawkes.A * (1.0 + env.hawkes.y_a)
+                    # On utilise la moyenne des A_eff pour le spread symétrique
+                    # puis le skew vient de q
+                    A_eff = 0.5 * (A_eff_b + A_eff_a)
+                    db, da = glft_model_b(
+                        q=env.q, sigma=env.sigma, gamma=env.gamma,
+                        k=env.hawkes.k, A_eff=A_eff,
+                    )
+                    action = to_action(db, da, env.delta_min, env.delta_max)
+
+                elif strategy == 'GLFT-Poisson':
+                    db, da = glft_model_b(
+                        q=env.q, sigma=env.sigma, gamma=env.gamma,
+                        k=env.hawkes.k, A_eff=env.hawkes.A,
+                    )
+                    action = to_action(db, da, env.delta_min, env.delta_max)
+
+                else:  # Random
+                    action = env.action_space.sample()
+
+                obs, _, done, _, _ = env.step(action)
+                inv_abs_sum += abs(env.q)
+                inv_count   += 1
+                if done:
+                    break
+
+            results[strategy]['pnl'].append(env.pnl)
+            results[strategy]['inv_final'].append(abs(env.q))
+            results[strategy]['inv_mean'].append(inv_abs_sum / max(inv_count, 1))
+            results[strategy]['n_trades'].append(env.n_buys + env.n_sells)
+            results[strategy]['spread_mean'].append(env.avg_spread)
+
+    # ── Tableau de métriques ──
+    print("=" * 90)
+    print(f"  {'Stratégie':<22} {'PnL moy':>9} {'PnL std':>9} "
+          f"{'Sharpe':>8} {'|q| fin':>8} {'|q| moy':>8} "
+          f"{'Trades':>7} {'Spread':>8}")
+    print("=" * 90)
+    for s in strategies:
+        m   = np.mean(results[s]['pnl'])
+        std = np.std(results[s]['pnl'])
+        sharpe = m / (std + 1e-8)
+        print(f"  {s:<22} {m:>9.3f} {std:>9.3f} "
+              f"{sharpe:>8.3f} "
+              f"{np.mean(results[s]['inv_final']):>8.2f} "
+              f"{np.mean(results[s]['inv_mean']):>8.2f} "
+              f"{np.mean(results[s]['n_trades']):>7.1f} "
+              f"{np.mean(results[s]['spread_mean']):>8.4f}")
+    print("=" * 90)
+
+    # ── Plots ──
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+
+    for s in strategies:
+        axes[0,0].hist(results[s]['pnl'], bins=40,
+                       alpha=0.45, label=s, color=colors[s])
+    axes[0,0].set_title('Distribution PnL final')
+    axes[0,0].set_xlabel('PnL')
+    axes[0,0].legend(fontsize=8)
+
+    means = [np.mean(results[s]['pnl']) for s in strategies]
+    stds  = [np.std(results[s]['pnl'])  for s in strategies]
+    x_pos = range(len(strategies))
+    axes[0,1].bar(x_pos, means, yerr=stds, capsize=5,
+                  color=[colors[s] for s in strategies], alpha=0.7)
+    axes[0,1].set_xticks(x_pos)
+    axes[0,1].set_xticklabels(strategies, rotation=15, fontsize=8)
+    axes[0,1].set_title('PnL moyen ± std')
+    axes[0,1].set_ylabel('PnL')
+
+    sharpes = [np.mean(results[s]['pnl']) /
+               (np.std(results[s]['pnl']) + 1e-8)
+               for s in strategies]
+    axes[0,2].bar(x_pos, sharpes,
+                  color=[colors[s] for s in strategies], alpha=0.7)
+    axes[0,2].set_xticks(x_pos)
+    axes[0,2].set_xticklabels(strategies, rotation=15, fontsize=8)
+    axes[0,2].set_title('Sharpe ratio')
+
+    for s in strategies:
+        axes[1,0].hist(results[s]['inv_final'], bins=range(0, env.Q+3),
+                       alpha=0.45, label=s, color=colors[s])
+    axes[1,0].set_title('Distribution |q_T|')
+    axes[1,0].set_xlabel('|inventaire final|')
+    axes[1,0].legend(fontsize=8)
+
+    inv_means = [np.mean(results[s]['inv_mean']) for s in strategies]
+    axes[1,1].bar(x_pos, inv_means,
+                  color=[colors[s] for s in strategies], alpha=0.7)
+    axes[1,1].set_xticks(x_pos)
+    axes[1,1].set_xticklabels(strategies, rotation=15, fontsize=8)
+    axes[1,1].set_title('|Inventaire| moyen sur épisode')
+
+    trade_means = [np.mean(results[s]['n_trades']) for s in strategies]
+    axes[1,2].bar(x_pos, trade_means,
+                  color=[colors[s] for s in strategies], alpha=0.7)
+    axes[1,2].set_xticks(x_pos)
+    axes[1,2].set_xticklabels(strategies, rotation=15, fontsize=8)
+    axes[1,2].set_title('Nombre moyen de trades')
+
+    plt.tight_layout()
+    plt.savefig(f"{SAVE_PATH}/backtest_comparison.png", dpi=150)
+    plt.show()
+
+    return results
+
+
+# ── Backtest ──
+env_params = dict(
+    T=100, dt=0.05, sigma=0.3,
+    gamma=0.1, liq_penalty=0.5,
+    A=1.0, k=1.5,
+    Q=5,
+    alpha_bb=0.3, alpha_aa=0.3,
+    alpha_ab=0.0, alpha_ba=0.0,
+    beta=1.5,
+)
+
+env = MarketMakingEnv(**env_params)
+model = SAC.load(f"{SAVE_PATH}/best_model", env=env)
+
+results = backtest_comparison(model, env_params, n_episodes=500)
+
+
+# ── Analyse d'un épisode unique : SAC vs GLFT-Poisson ──
+def run_single_episode(strategy, model, env_params, seed=123):
+    env = MarketMakingEnv(**env_params)
+    obs, _ = env.reset(seed=seed)
+
+    data = {'q': [], 'S': [], 'pnl': [], 'delta_b': [], 'delta_a': [],
+            'y_b': [], 'y_a': [], 'spread': []}
+
+    while True:
+        if strategy == 'SAC':
+            action, _ = model.predict(obs, deterministic=True)
+        elif strategy == 'GLFT-Poisson':
+            db, da = glft_model_b(
+                q=env.q, sigma=env.sigma, gamma=env.gamma,
+                k=env.hawkes.k, A_eff=env.hawkes.A)
+            action = np.array([
+                np.clip(2*(db - env.delta_min)/(env.delta_max - env.delta_min) - 1, -1, 1),
+                np.clip(2*(da - env.delta_min)/(env.delta_max - env.delta_min) - 1, -1, 1)
+            ], dtype=np.float32)
+        else:
+            action = env.action_space.sample()
+
+        delta_b, delta_a = env._denormalize_action(action)
+        data['delta_b'].append(delta_b)
+        data['delta_a'].append(delta_a)
+        data['spread'].append(delta_b + delta_a)
+        data['y_b'].append(env.hawkes.y_b)
+        data['y_a'].append(env.hawkes.y_a)
+
+        obs, _, done, _, _ = env.step(action)
+        data['q'].append(env.q)
+        data['S'].append(env.S)
+        data['pnl'].append(env.pnl)
+        if done:
+            break
+
+    return data
+
+data_sac  = run_single_episode('SAC', model, env_params, seed=42)
+data_glft = run_single_episode('GLFT-Poisson', model, env_params, seed=42)
+
+fig, axes = plt.subplots(4, 1, figsize=(16, 14), sharex=True)
+
+axes[0].plot(data_sac['q'], label='SAC', color='blue')
+axes[0].plot(data_glft['q'], label='GLFT-Poisson', color='orange', alpha=0.7)
+axes[0].axhline(0, color='gray', linestyle='--')
+axes[0].set_ylabel('Inventaire q')
+axes[0].set_title('Inventaire au cours du temps')
+axes[0].legend()
+
+axes[1].plot(data_sac['spread'], label='SAC spread', color='blue', alpha=0.7)
+axes[1].plot(data_glft['spread'], label='GLFT spread', color='orange', alpha=0.7)
+axes[1].set_ylabel('Spread (δ_b + δ_a)')
+axes[1].set_title('Spread coté')
+axes[1].legend()
+
+axes[2].plot(data_sac['y_b'], label='$y^b$ (SAC)', color='blue', alpha=0.7)
+axes[2].plot(data_sac['y_a'], label='$y^a$ (SAC)', color='red', alpha=0.7)
+axes[2].set_ylabel('Hawkes y')
+axes[2].set_title('Composantes Hawkes (épisode SAC)')
+axes[2].legend()
+
+axes[3].plot(data_sac['pnl'], label='SAC', color='blue')
+axes[3].plot(data_glft['pnl'], label='GLFT-Poisson', color='orange', alpha=0.7)
+axes[3].set_ylabel('PnL')
+axes[3].set_title('PnL mark-to-market')
+axes[3].set_xlabel('Pas de temps')
+axes[3].legend()
+
+plt.tight_layout()
+plt.savefig(f"{SAVE_PATH}/episode_analysis.png", dpi=150)
+plt.show()
+
+
+# ── Sensibilité : varier alpha et comparer SAC vs GLFT ──
+alphas_to_test = [0.0, 0.15, 0.3, 0.5, 0.7]
+n_ep = 200
+
+sensitivity_results = {}
+
+for alpha_val in alphas_to_test:
+    params = env_params.copy()
+    params['alpha_bb'] = alpha_val
+    params['alpha_aa'] = alpha_val
+
+    # Vérifier stabilité
+    rho = alpha_val / params['beta']
+    if rho >= 1:
+        print(f"alpha={alpha_val} instable (rho={rho:.2f}), skip")
+        continue
+
+    env_test = MarketMakingEnv(**params)
+    model_test = SAC.load(f"{SAVE_PATH}/best_model", env=env_test)
+
+    pnl_sac, pnl_glft = [], []
+    for ep in range(n_ep):
+        # SAC
+        env_s = MarketMakingEnv(**params)
+        obs, _ = env_s.reset(seed=ep)
+        while True:
+            action, _ = model_test.predict(obs, deterministic=True)
+            obs, _, done, _, _ = env_s.step(action)
+            if done: break
+        pnl_sac.append(env_s.pnl)
+
+        # GLFT-Poisson
+        env_g = MarketMakingEnv(**params)
+        obs, _ = env_g.reset(seed=ep)
+        while True:
+            db, da = glft_model_b(
+                q=env_g.q, sigma=env_g.sigma, gamma=env_g.gamma,
+                k=env_g.hawkes.k, A_eff=env_g.hawkes.A)
+            action = np.array([
+                np.clip(2*(db - env_g.delta_min)/(env_g.delta_max - env_g.delta_min) - 1, -1, 1),
+                np.clip(2*(da - env_g.delta_min)/(env_g.delta_max - env_g.delta_min) - 1, -1, 1)
+            ], dtype=np.float32)
+            obs, _, done, _, _ = env_g.step(action)
+            if done: break
+        pnl_glft.append(env_g.pnl)
+
+    sensitivity_results[alpha_val] = {
+        'sac_mean': np.mean(pnl_sac), 'sac_std': np.std(pnl_sac),
+        'glft_mean': np.mean(pnl_glft), 'glft_std': np.std(pnl_glft),
+    }
+    print(f"α={alpha_val:.2f} | SAC: {np.mean(pnl_sac):+.2f}±{np.std(pnl_sac):.2f} | "
+          f"GLFT: {np.mean(pnl_glft):+.2f}±{np.std(pnl_glft):.2f}")
+
+# Plot
+if sensitivity_results:
+    alphas_ok = sorted(sensitivity_results.keys())
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.errorbar(alphas_ok,
+                [sensitivity_results[a]['sac_mean'] for a in alphas_ok],
+                yerr=[sensitivity_results[a]['sac_std'] for a in alphas_ok],
+                label='SAC', marker='o', capsize=4)
+    ax.errorbar(alphas_ok,
+                [sensitivity_results[a]['glft_mean'] for a in alphas_ok],
+                yerr=[sensitivity_results[a]['glft_std'] for a in alphas_ok],
+                label='GLFT-Poisson', marker='s', capsize=4)
+    ax.set_xlabel('$\\alpha$ (auto-excitation)')
+    ax.set_ylabel('PnL moyen')
+    ax.set_title('Sensibilité au paramètre Hawkes $\\alpha$')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"{SAVE_PATH}/sensitivity_alpha.png", dpi=150)
+    plt.show()
+
