@@ -1,8 +1,21 @@
-numpy
-scipy
-matplotlib
-jupyter
-plotly
-streamlit
-websockets
-requests
+# Core scientific stack
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+
+# Visualization
+matplotlib>=3.7
+seaborn>=0.12
+
+# Jupyter
+jupyterlab>=4.0
+ipykernel>=6.0
+ipywidgets>=8.0
+
+# Reinforcement Learning (notebook 10)
+gymnasium>=0.29
+stable-baselines3>=2.0
+torch>=2.0
+
+# Data calibration
+scikit-learn>=1.3
