@@ -2,7 +2,7 @@
 
 **Course**: MATH 70125 — Market Microstructure (Prof. Mathieu Rosenbaum)  
 **Institution**: Imperial College London  
-**Authors**: Hamza Boukraichi, Diane Murzi, Chedi Mnif
+**Authors**: Hamza El arji, Diane Murzi, Chedi Mnif
 
 ---
 
